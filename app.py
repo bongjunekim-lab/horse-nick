@@ -15,7 +15,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🐎 씨수말 닉(Nick) 구조 분석기")
-st.caption("자마 -> 엄마 -> 외조부(BMS) 순서로 선을 끝까지 추적합니다.")
+st.caption("자마와 선(Line)으로 연결된 '프로필(부마+모마)' 정보를 그대로 가져옵니다.")
 
 # 1. 검색창
 query = st.text_input("씨수말 이름을 입력하세요 (예: Bernardini):", "").strip()
@@ -47,7 +47,7 @@ if query:
             if max_children == 0:
                  st.warning(f"⚠️ '{best_name}'을(를) 찾았으나, 자마가 없습니다.")
             else:
-                # --- 2단계: 자마 순회 및 '강력한 외조부 추적' ---
+                # --- 2단계: 자마 순회 및 연결된 프로필 가져오기 ---
                 males = []
                 females = []
                 
@@ -57,49 +57,33 @@ if query:
                     # 1. 자마 이름
                     foal_name = foal.get('TEXT', '').strip()
                     
-                    # 2. 선(Line) 확인 - 연결된 게 없으면 제외
+                    # 2. [핵심] 자마와 연결된 '선(Line)' 하나를 따라갑니다.
+                    # 선생님 말씀: "자마 - 선 -> 엄마(앞에 아빠있음)"
                     line_connections = foal.findall('node')
+                    
+                    # 연결된 게 없으면 제외 (화면에 안 보여줌)
                     if not line_connections:
                         continue 
-
-                    # ==========================================================
-                    # [핵심 수정] 무조건 끝까지 파고들어 텍스트 가져오기
-                    # ==========================================================
-                    bms_text = ""
                     
-                    # 첫 번째 연결된 노드 (보통 엄마)
-                    first_node = line_connections[0]
-                    first_text = first_node.get('TEXT', '').strip()
-                    
-                    # 그 밑에 또 연결된 노드가 있는지 확인 (보통 외조부)
-                    second_nodes = first_node.findall('node')
-                    
-                    if second_nodes:
-                        # 손자 노드(외조부)가 있으면 그 텍스트를 우선으로 씁니다.
-                        second_text = second_nodes[0].get('TEXT', '').strip()
-                        if second_text:
-                            bms_text = second_text
-                        else:
-                            # 손자 노드는 있는데 글자가 비어있으면 엄마 노드 글자라도 가져옴
-                            bms_text = first_text
-                    else:
-                        # 손자 노드가 없으면 엄마 노드 글자를 외조부 정보로 간주하고 가져옴
-                        bms_text = first_text
+                    # 3. 연결된 박스의 '글자(TEXT)'를 통째로 가져옵니다.
+                    # 이 글자 앞부분에 아버지가 있다고 하셨으니, 그대로 보여주면 됩니다.
+                    target_node = line_connections[0]
+                    profile_text = target_node.get('TEXT', '').strip()
 
-                    # 글자가 너무 길면(설명문이면) 잘라서 보여주기 (옵션)
-                    # if len(bms_text) > 20: bms_text = bms_text[:20] + "..."
-
-                    # 3. 화면 표시용 (외조부 텍스트가 있을 때만 괄호 표시)
-                    if bms_text:
-                        display_html = f"<b>{foal_name}</b> <span style='color:gray; font-size:0.9em;'>({bms_text})</span>"
+                    # 4. 화면 표시 
+                    # 자마이름 (프로필 내용)
+                    if profile_text:
+                        # 프로필 글자는 회색으로 괄호 안에 넣습니다.
+                        display_html = f"<b>{foal_name}</b> <span style='color:gray; font-size:0.9em;'>({profile_text})</span>"
                     else:
                         display_html = f"<b>{foal_name}</b>"
 
-                    # 4. 성별 분류 (이름에 '암)' 포함 여부)
+                    # 5. 성별 분류 (이름에 '암)' 또는 'Filly' 포함 여부)
                     is_female = False
                     if "암)" in foal_name or "Filly" in foal_name or "Mare" in foal_name:
                         is_female = True
                     
+                    # 리스트 추가
                     if is_female:
                         females.append(display_html)
                     else:
@@ -111,12 +95,13 @@ if query:
                 st.markdown("---")
                 st.markdown(f"""
                 <div class="header-box">
-                    📊 {best_name} 구조 분석 결과 (선으로 연결된 자마 총 {total}두)
+                    📊 {best_name} 구조 분석 결과 (총 {total}두)
                 </div>
                 """, unsafe_allow_html=True)
                 
                 col1, col2 = st.columns(2)
                 
+                # 왼쪽: 수말
                 with col1:
                     st.info(f"🟦 수말 (Colts/Geldings) - {len(males)}두")
                     if males:
@@ -125,6 +110,7 @@ if query:
                     else:
                         st.write("데이터 없음")
                 
+                # 오른쪽: 암말
                 with col2:
                     st.error(f"🟥 암말 (Fillies/Mares) - {len(females)}두")
                     if females:
