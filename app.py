@@ -9,7 +9,7 @@ st.set_page_config(page_title="씨수말 닉(Nick) 추적기", layout="wide")
 current_files = os.listdir('.') # 현재 폴더에 있는 파일 목록을 가져옵니다
 file_path = 'data.mm' # 우리가 찾는 파일 이름
 
-st.title("🐎 씨수말 닉(Nick) 분석기")
+st.title("🐎 씨수말 닉(Nick) 분석기 (성공!)")
 
 # 파일이 진짜로 있는지 검사!
 if not os.path.exists(file_path):
