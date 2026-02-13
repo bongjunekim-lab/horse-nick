@@ -2,8 +2,8 @@ import streamlit as st
 import xml.etree.ElementTree as ET
 import os
 
-# 페이지 설정 및 스타일 (박스 디자인 유지)
-st.set_page_config(page_title="씨수말 닉 분석기", layout="wide")
+# 페이지 설정
+st.set_page_config(page_title="씨수말 닉 분석기 (Speed)", layout="wide")
 st.markdown("""
     <style>
     .male-box { background-color: #e8f0fe; padding: 10px; border-radius: 5px; margin-bottom: 5px; border-left: 5px solid #4285f4; color: black; }
@@ -12,95 +12,99 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🐎 씨수말 닉(Nick) 정밀 분석기")
+st.title("🐎 씨수말 닉(Nick) 분석기 (초고속 모드)")
 
-# --- 1단계: 무조건 다 읽어오는 로더 (검색 실패 방지용) ---
+# --- 1단계: 이름만 빨리 가져오기 (가볍게!) ---
 @st.cache_data
-def load_raw_data():
-    if not os.path.exists('data.mm'): return {}
+def get_horse_names_only():
+    if not os.path.exists('data.mm'): return []
+    # 파일을 엽니다.
     tree = ET.parse('data.mm')
     root = tree.getroot()
     
-    # 필터링 없이 일단 다 담습니다. (검색이 되어야 하니까요)
-    # { '씨수말이름': [자마1 텍스트, 자마2 텍스트, ...] }
-    db = {}
+    # 자마 정보는 무시하고, '씨수말 이름'만 쏙쏙 뽑아냅니다.
+    names = set()
     for node in root.iter('node'):
-        name = node.get('TEXT', '').strip()
-        if name:
-            # 자식 노드(자마)가 있으면 무조건 가져옵니다.
-            children = [c.get('TEXT', '').strip() for c in node.findall('node') if c.get('TEXT')]
-            if children:
-                db[name] = children
-    return db
+        text = node.get('TEXT', '').strip()
+        if text:
+            names.add(text)
+    return sorted(list(names))
 
-# 데이터 로딩 (이제 "검색 결과 없음"은 안 뜰 겁니다)
-horse_db = load_raw_data()
+# 로딩 시작 (이젠 금방 끝날 겁니다)
+all_names = get_horse_names_only()
 
-# --- 2단계: 검색 및 리스트 선택 ---
+# --- 2단계: 검색창 ---
 st.write("### 1. 씨수말 검색")
-query = st.text_input("마명을 입력하세요 (예: storm, pulpit):", "").strip()
+# 검색어 입력 전에는 전체 리스트를 보여주지 않아 속도를 더 높입니다.
+query = st.text_input("마명을 입력하세요 (예: pulpit):", "").strip()
 
-if query and horse_db:
-    # 대소문자 무시하고 일단 이름이 비슷한 건 다 찾습니다.
-    matches = [name for name in horse_db.keys() if query.lower() in name.lower()]
+selected_horse = None
+
+if query:
+    # 입력한 글자가 포함된 이름만 찾습니다.
+    matches = [name for name in all_names if query.lower() in name.lower()]
     
     if matches:
-        # 검색된 리스트를 먼저 보여줍니다.
-        selected = st.selectbox(f"✅ {len(matches)}두가 검색되었습니다. 분석할 말을 선택하세요:", sorted(matches))
-        
-        # --- 3단계: 선택 후 실시간 분석 (여기서만 필터링) ---
-        if selected:
-            st.markdown("---")
-            st.write(f"### 2. {selected} 닉(Nick) 분석 결과")
-            
-            raw_children = horse_db[selected]
-            
-            # 여기서 선생님의 규칙(BMS/Sire)대로 분류합니다.
-            males = []   # BMS 포함된 놈 (수말)
-            females = [] # Sire 포함된 놈 (암말)
-            others = []  # 연결고리가 없는 놈 (기타)
-            
-            for child in raw_children:
-                if "BMS" in child or "bms" in child:
-                    males.append(child)
-                elif "Sire" in child or "sire" in child:
-                    females.append(child)
-                else:
-                    others.append(child)
-            
-            # 분석 결과 요약 바
-            total_valid = len(males) + len(females)
-            st.markdown(f"""
-            <div class="header-box">
-                📊 분석 요약: 수말(BMS) {len(males)}두 / 암말(Sire) {len(females)}두 (유효 자마 총 {total_valid}두)
-            </div>
-            """, unsafe_allow_html=True)
-
-            # 화면 분할 출력
-            col1, col2 = st.columns(2)
-            
-            # 왼쪽: 수말
-            with col1:
-                st.info(f"🟦 **수말 (BMS 연결) - {len(males)}두**")
-                if males:
-                    for h in males:
-                        st.markdown(f'<div class="male-box">{h}</div>', unsafe_allow_html=True)
-                else:
-                    st.write("데이터 없음")
-
-            # 오른쪽: 암말
-            with col2:
-                st.error(f"🟥 **암말 (Sire 연결) - {len(females)}두**")
-                if females:
-                    for h in females:
-                        st.markdown(f'<div class="female-box">{h}</div>', unsafe_allow_html=True)
-                else:
-                    st.write("데이터 없음")
-            
-            # (선택사항) 연결고리 없는 데이터 확인용 - 필요 없으면 지우셔도 됩니다.
-            if others:
-                with st.expander(f"⚠️ 족보 연결 정보(BMS/Sire)가 없는 자마 ({len(others)}두) 보기"):
-                    st.write(others)
-                    
+        selected_horse = st.selectbox(f"✅ {len(matches)}두 검색됨. 선택하세요:", matches)
     else:
-        st.warning("🔍 검색된 이름이 없습니다. 철자를 확인해 주세요.")
+        st.warning("검색 결과가 없습니다.")
+
+# --- 3단계: 선택했을 때만! 정밀 분석 시작 (On-Demand) ---
+if selected_horse:
+    # ★ 여기서 파일을 다시 열어서 '그 말'의 정보만 쏙 빼옵니다.
+    # 전체를 다 외우는 것보다, 필요할 때 책을 펴서 찾는 게 훨씬 빠릅니다.
+    tree = ET.parse('data.mm')
+    root = tree.getroot()
+    
+    target_node = None
+    # 2만 개 중 선택한 말의 위치를 찾습니다.
+    for node in root.iter('node'):
+        if node.get('TEXT', '').strip() == selected_horse:
+            target_node = node
+            break
+            
+    if target_node:
+        st.markdown("---")
+        st.write(f"### 2. {selected_horse} 상세 분석 결과")
+        
+        # 자마들 수집 및 분류 (선생님의 핵심 로직)
+        males = []
+        females = []
+        
+        children = target_node.findall('node')
+        for child in children:
+            text = child.get('TEXT', '').strip()
+            
+            # 족보 연결(Line) 필터링
+            if "BMS" in text or "bms" in text:
+                males.append(text)
+            elif "Sire" in text or "sire" in text:
+                females.append(text)
+            # 족보 없는 껍데기는 버림
+            
+        # 결과 출력
+        total = len(males) + len(females)
+        
+        st.markdown(f"""
+        <div class="header-box">
+            📊 분석 요약: 수말(BMS) {len(males)}두 / 암말(Sire) {len(females)}두 (유효 자마 총 {total}두)
+        </div>
+        """, unsafe_allow_html=True)
+
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.info(f"🟦 **수말 (BMS 연결)**")
+            if males:
+                for h in males:
+                    st.markdown(f'<div class="male-box">{h}</div>', unsafe_allow_html=True)
+            else:
+                st.write("데이터 없음")
+                
+        with col2:
+            st.error(f"🟥 **암말 (Sire 연결)**")
+            if females:
+                for h in females:
+                    st.markdown(f'<div class="female-box">{h}</div>', unsafe_allow_html=True)
+            else:
+                st.write("데이터 없음")
