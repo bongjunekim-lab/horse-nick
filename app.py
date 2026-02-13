@@ -1,79 +1,107 @@
 import streamlit as st
 import xml.etree.ElementTree as ET
 import os
-import pandas as pd
 
-# 1. 페이지 설정 및 제목
-st.set_page_config(page_title="2만두 통합 분석기", layout="wide")
-st.title("🐎 씨수말 & 자마 통합 분석 시스템 (2만두 최적화)")
+st.set_page_config(page_title="씨수말 닉 분석기 Pro", layout="wide")
 
-# 2. 고속 데이터 로더 (2만두 계보 분석용)
+# --- 1. 데이터 로드 및 수말/암말 자동 분류 ---
 @st.cache_data
-def load_pedigree_data():
-    if not os.path.exists('data.mm'):
-        return {}
-    
-    # XML 파일을 읽어 계통 지도를 그립니다.
+def load_nick_data():
+    if not os.path.exists('data.mm'): return {}
     tree = ET.parse('data.mm')
     root = tree.getroot()
     
-    # {씨수말이름: [자마리스트]} 구조로 저장
+    # { '씨수말이름': {'males': [], 'females': []} } 구조로 저장
     db = {}
+    
     for node in root.iter('node'):
         parent_name = node.get('TEXT', '').strip()
+        
+        # 씨수말 이름이 있고 자식 노드가 있는 경우만 분석
         if parent_name:
-            # 해당 노드 바로 아래에 있는 자마(node)들만 수집
-            children = [c.get('TEXT') for c in node.findall('node') if c.get('TEXT')]
+            children = node.findall('node')
             if children:
-                # 같은 이름의 말이 있을 경우를 대비해 리스트를 합침
-                if parent_name in db:
-                    db[parent_name].extend(children)
-                else:
-                    db[parent_name] = children
+                males = []
+                females = []
+                
+                for child in children:
+                    text = child.get('TEXT', '')
+                    # ★ 핵심 로직: 텍스트 내용을 보고 수말/암말 분류
+                    # BMS(외조부) 정보가 있으면 -> 수말 리스트로
+                    # Sire(부마) 정보가 있거나 그 외 -> 암말 리스트로 (혹은 아이콘 속성 활용 가능)
+                    if "BMS:" in text: 
+                        males.append(text)
+                    elif "Sire:" in text:
+                        females.append(text)
+                    else:
+                        # 구분자가 명확하지 않은 경우 일단 수말 쪽에 포함 (데이터 확인 필요)
+                        # 만약 데이터에 아이콘(icon) 정보가 있다면 그것을 쓰는 것이 더 정확합니다.
+                        # 여기서는 선생님 설명대로 텍스트 패턴을 우선합니다.
+                        if "Sire" in text: 
+                            females.append(text)
+                        else:
+                            males.append(text)
+
+                # 자마가 한 마리라도 있으면 DB에 등록
+                if males or females:
+                    if parent_name not in db:
+                        db[parent_name] = {'males': males, 'females': females}
+                    else:
+                        # 이미 등록된 동명이마 처리 (기존 리스트에 추가)
+                        db[parent_name]['males'].extend(males)
+                        db[parent_name]['females'].extend(females)
     return db
 
-# 데이터 로딩 시작
-with st.spinner('2만 마리의 계보를 분석 중입니다. 잠시만 기다려 주세요...'):
-    horse_db = load_pedigree_data()
+# 데이터 로딩
+horse_db = load_nick_data()
 
-# 3. 검색 및 결과 출력 섹션
-st.write("---")
-query = st.text_input("🔍 검색할 씨수말 이름을 입력하세요 (소문자 가능):", "").strip()
+# --- 2. 검색 및 닉 분석 화면 구현 ---
+st.title("🐎 씨수말 닉(Nick) 상세 분석기")
+st.markdown("수말 자마는 **BMS(외조부)**, 암말 자마는 **Sire(부마)**를 기준으로 분석합니다.")
+
+query = st.text_input("분석할 씨수말 이름을 입력하세요 (예: pulpit, bernardini):", "").strip()
 
 if query and horse_db:
+    # 대소문자 무시 검색
     q_low = query.lower()
-    # 2만 개 데이터 중 검색어가 포함된 말들을 찾습니다.
     matches = [name for name in horse_db.keys() if q_low in name.lower()]
     
     if matches:
-        # 검색된 결과 중 하나를 선택
-        selected = st.selectbox(f"✅ {len(matches)}두가 발견되었습니다. 분석할 말을 선택하세요:", sorted(list(set(matches))))
+        selected = st.selectbox(f"✅ {len(matches)}두 검색됨. 선택하세요:", sorted(matches))
         
-        # 선택된 말의 자마 리스트 가져오기
-        offspring_list = horse_db[selected]
+        # 선택된 말의 데이터 가져오기
+        data = horse_db[selected]
+        male_list = data['males']
+        female_list = data['females']
         
-        st.subheader(f"📊 {selected}의 자마 목록 (총 {len(offspring_list)}두)")
+        # --- 3. 화면 분할 (왼쪽: 수말 / 오른쪽: 암말) ---
+        st.divider()
+        st.subheader(f"📊 {selected}의 자마 분석 결과")
         
-        # 표 데이터 생성 (Pandas 사용)
-        df = pd.DataFrame({
-            "순번": range(1, len(offspring_list) + 1),
-            "자마 및 상세 정보": offspring_list
-        })
-        
-        # 화면에 표 출력
-        st.table(df)
-        
-        # 4. 엑셀(CSV) 다운로드 버튼
-        # 한글 깨짐 방지를 위해 utf-8-sig 사용
-        csv_data = df.to_csv(index=False).encode('utf-8-sig')
-        st.download_button(
-            label="📥 현재 자마 리스트를 엑셀로 저장하기",
-            data=csv_data,
-            file_name=f"{selected}_자마리스트.csv",
-            mime="text/csv"
-        )
-    else:
-        st.warning(f"❌ '{query}'와(과) 일치하는 씨수말 데이터가 없습니다.")
+        # 상단 요약 바 (선생님 사진처럼 초록색 바 느낌)
+        st.success(f"🐎 수말 {len(male_list)}두 / 🎀 암말 {len(female_list)}두 (총 {len(male_list)+len(female_list)}두)")
 
-elif not query:
-    st.info("왼쪽 검색창에 마명을 입력하면 분석이 시작됩니다.")
+        col1, col2 = st.columns(2)
+        
+        # 왼쪽 컬럼: 수말 (Colts)
+        with col1:
+            st.info(f"🟦 **수말 (Colts) - BMS 연결 ({len(male_list)})**")
+            if male_list:
+                for horse in male_list:
+                    # 사진처럼 카드 형태로 출력 (BMS 강조)
+                    st.markdown(f"exam: {horse}")
+            else:
+                st.write("등록된 수말 자마가 없습니다.")
+                
+        # 오른쪽 컬럼: 암말 (Fillies)
+        with col2:
+            st.error(f"🟥 **암말 (Fillies) - Sire 연결 ({len(female_list)})**")
+            if female_list:
+                for horse in female_list:
+                    # 사진처럼 카드 형태로 출력 (Sire 강조)
+                    st.markdown(f"exam: {horse}")
+            else:
+                st.write("등록된 암말 자마가 없습니다.")
+                
+    else:
+        st.warning(f"❌ '{query}'에 대한 데이터가 없습니다.")
