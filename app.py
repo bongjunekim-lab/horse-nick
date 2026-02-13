@@ -4,104 +4,105 @@ import os
 
 st.set_page_config(page_title="씨수말 닉 분석기 Pro", layout="wide")
 
-# --- 1. 데이터 로드 및 수말/암말 자동 분류 ---
+# 스타일: 선생님이 원하시는 박스 디자인(초록/파랑/빨강)을 위해 CSS를 살짝 입힙니다.
+st.markdown("""
+    <style>
+    .stAlert { padding: 10px; border-radius: 10px; }
+    .male-box { background-color: #e8f0fe; padding: 10px; border-radius: 5px; margin-bottom: 5px; border-left: 5px solid #4285f4; color: black; }
+    .female-box { background-color: #fce8e6; padding: 10px; border-radius: 5px; margin-bottom: 5px; border-left: 5px solid #ea4335; color: black; }
+    .header-box { background-color: #e6fffa; padding: 15px; border-radius: 10px; border: 1px solid #4fd1c5; color: #234e52; font-weight: bold; margin-bottom: 20px;}
+    </style>
+""", unsafe_allow_html=True)
+
+st.title("🐎 씨수말 닉(Nick) 정밀 분석기")
+
+# --- 1. 데이터 로드 및 "연결고리" 필터링 ---
 @st.cache_data
-def load_nick_data():
+def load_filtered_data():
     if not os.path.exists('data.mm'): return {}
     tree = ET.parse('data.mm')
     root = tree.getroot()
     
-    # { '씨수말이름': {'males': [], 'females': []} } 구조로 저장
     db = {}
     
     for node in root.iter('node'):
         parent_name = node.get('TEXT', '').strip()
         
-        # 씨수말 이름이 있고 자식 노드가 있는 경우만 분석
         if parent_name:
             children = node.findall('node')
             if children:
-                males = []
-                females = []
+                males = []   # BMS 연결된 수말
+                females = [] # Sire 연결된 암말
                 
                 for child in children:
-                    text = child.get('TEXT', '')
-                    # ★ 핵심 로직: 텍스트 내용을 보고 수말/암말 분류
-                    # BMS(외조부) 정보가 있으면 -> 수말 리스트로
-                    # Sire(부마) 정보가 있거나 그 외 -> 암말 리스트로 (혹은 아이콘 속성 활용 가능)
-                    if "BMS:" in text: 
+                    text = child.get('TEXT', '').strip()
+                    
+                    # ★ 핵심: "선으로 연결된 자마만 발췌" (조건부 필터링)
+                    # 조건 1: BMS(외조부) 정보가 있으면 -> 수말 리스트
+                    if "BMS" in text or "bms" in text:
                         males.append(text)
-                    elif "Sire:" in text:
+                    # 조건 2: Sire(부마) 정보가 있으면 -> 암말 리스트
+                    elif "Sire" in text or "sire" in text:
                         females.append(text)
-                    else:
-                        # 구분자가 명확하지 않은 경우 일단 수말 쪽에 포함 (데이터 확인 필요)
-                        # 만약 데이터에 아이콘(icon) 정보가 있다면 그것을 쓰는 것이 더 정확합니다.
-                        # 여기서는 선생님 설명대로 텍스트 패턴을 우선합니다.
-                        if "Sire" in text: 
-                            females.append(text)
-                        else:
-                            males.append(text)
-
-                # 자마가 한 마리라도 있으면 DB에 등록
+                    # 조건 3: 둘 다 없으면? -> 과감히 버립니다 (선생님 요청사항)
+                
+                # 유효한 자마가 하나라도 있을 때만 등록
                 if males or females:
-                    if parent_name not in db:
-                        db[parent_name] = {'males': males, 'females': females}
-                    else:
-                        # 이미 등록된 동명이마 처리 (기존 리스트에 추가)
+                    if parent_name in db:
                         db[parent_name]['males'].extend(males)
                         db[parent_name]['females'].extend(females)
+                    else:
+                        db[parent_name] = {'males': males, 'females': females}
     return db
 
-# 데이터 로딩
-horse_db = load_nick_data()
+horse_db = load_filtered_data()
 
-# --- 2. 검색 및 닉 분석 화면 구현 ---
-st.title("🐎 씨수말 닉(Nick) 상세 분석기")
-st.markdown("수말 자마는 **BMS(외조부)**, 암말 자마는 **Sire(부마)**를 기준으로 분석합니다.")
-
-query = st.text_input("분석할 씨수말 이름을 입력하세요 (예: pulpit, bernardini):", "").strip()
+# --- 2. 검색창 ---
+query = st.text_input("분석할 씨수말 이름을 입력하세요 (예: Bernardini):", "").strip()
 
 if query and horse_db:
     # 대소문자 무시 검색
-    q_low = query.lower()
-    matches = [name for name in horse_db.keys() if q_low in name.lower()]
+    matches = [name for name in horse_db.keys() if query.lower() in name.lower()]
     
     if matches:
         selected = st.selectbox(f"✅ {len(matches)}두 검색됨. 선택하세요:", sorted(matches))
         
-        # 선택된 말의 데이터 가져오기
         data = horse_db[selected]
         male_list = data['males']
         female_list = data['females']
+        total_count = len(male_list) + len(female_list)
         
-        # --- 3. 화면 분할 (왼쪽: 수말 / 오른쪽: 암말) ---
-        st.divider()
-        st.subheader(f"📊 {selected}의 자마 분석 결과")
+        st.markdown("---")
         
-        # 상단 요약 바 (선생님 사진처럼 초록색 바 느낌)
-        st.success(f"🐎 수말 {len(male_list)}두 / 🎀 암말 {len(female_list)}두 (총 {len(male_list)+len(female_list)}두)")
-
+        # --- 3. 선생님이 원하시는 "초록색 요약 바" 구현 ---
+        st.markdown(f"""
+        <div class="header-box">
+            📊 {selected} 분석 결과: 수말 {len(male_list)}두 / 암말 {len(female_list)}두 (총 {total_count}두)
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # --- 4. 좌우 분할 및 박스형 리스트 출력 ---
         col1, col2 = st.columns(2)
         
-        # 왼쪽 컬럼: 수말 (Colts)
+        # [왼쪽] 수말 (BMS 연결)
         with col1:
-            st.info(f"🟦 **수말 (Colts) - BMS 연결 ({len(male_list)})**")
+            st.info(f"🟦 **수말 (Colts) - 외조부(BMS) 연결**")
             if male_list:
                 for horse in male_list:
-                    # 사진처럼 카드 형태로 출력 (BMS 강조)
-                    st.markdown(f"exam: {horse}")
+                    # 그냥 글자만 뿌리는 게 아니라, 예쁜 박스에 담습니다.
+                    st.markdown(f'<div class="male-box">🐎 {horse}</div>', unsafe_allow_html=True)
             else:
-                st.write("등록된 수말 자마가 없습니다.")
-                
-        # 오른쪽 컬럼: 암말 (Fillies)
+                st.write("📌 BMS 정보가 연결된 수말이 없습니다.")
+        
+        # [오른쪽] 암말 (Sire 연결)
         with col2:
-            st.error(f"🟥 **암말 (Fillies) - Sire 연결 ({len(female_list)})**")
+            st.error(f"🟥 **암말 (Fillies) - 부마(Sire) 연결**")
             if female_list:
                 for horse in female_list:
-                    # 사진처럼 카드 형태로 출력 (Sire 강조)
-                    st.markdown(f"exam: {horse}")
+                    # 빨간색 계열 박스에 담습니다.
+                    st.markdown(f'<div class="female-box">🎀 {horse}</div>', unsafe_allow_html=True)
             else:
-                st.write("등록된 암말 자마가 없습니다.")
-                
+                st.write("📌 Sire 정보가 연결된 암말이 없습니다.")
+
     else:
-        st.warning(f"❌ '{query}'에 대한 데이터가 없습니다.")
+        st.warning("검색 결과가 없습니다. (족보 연결 정보가 없는 말일 수 있습니다)")
