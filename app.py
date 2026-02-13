@@ -3,79 +3,60 @@ import xml.etree.ElementTree as ET
 import re
 import os
 
-# 1. 전문가용 스타일 (선생님의 UI 가이드 반영)
-st.set_page_config(page_title="엘리트 혈통 닉 분석 시스템", layout="wide")
+# 스타일 설정: 선생님의 전문가용 레이아웃
+st.set_page_config(page_title="버나디니 화살표 경로 분석기", layout="wide")
 st.markdown("""
     <style>
-    .male-box { background-color: #f1f8ff; padding: 10px; border-radius: 8px; margin-bottom: 5px; border-left: 5px solid #0077CC; }
-    .female-box { background-color: #fff5f5; padding: 10px; border-radius: 8px; margin-bottom: 5px; border-left: 5px solid #C0392B; }
-    .bms-final { color: #ff4b4b; font-weight: bold; } /* 선생님이 찾으시는 최종 외조부 */
-    .header-box { background-color: #f0fff4; padding: 15px; border-radius: 10px; border: 1px solid #48bb78; font-weight: bold; margin-bottom: 20px; }
+    .male-box { background-color: #f1f8ff; padding: 12px; border-radius: 8px; margin-bottom: 8px; border-left: 6px solid #0077CC; }
+    .female-box { background-color: #fff5f5; padding: 12px; border-radius: 8px; margin-bottom: 8px; border-left: 6px solid #C0392B; }
+    .bms-text { color: #ff4b4b; font-weight: bold; font-size: 1.1em; }
+    .header-info { background-color: #e6fffa; padding: 15px; border-radius: 10px; border: 1px solid #38b2ac; margin-bottom: 20px; }
     </style>
     """, unsafe_allow_html=True)
 
-# [핵심] 대시(-) 개수와 '암)' 기호를 분석하여 외조부를 찾는 함수
-def trace_bms_by_dash(foal_node, root, parent_map):
-    f_text = foal_node.get('TEXT', '').strip()
-    # 자마의 대시(-) 개수 파악 (예: "- 암) 자마" -> 1개)
-    f_dash_match = re.match(r'^(-+)', f_text)
-    f_dash_count = len(f_dash_match.group(1)) if f_dash_match else 0
-
-    curr = foal_node
-    # 상위 계층으로 올라가며 모마(Dam) 탐색
-    while curr in parent_map:
-        curr = parent_map[curr]
-        p_text = curr.get('TEXT', '').strip()
-        p_dash_match = re.match(r'^(-+)', p_text)
-        p_dash_count = len(p_dash_match.group(1)) if p_dash_match else 0
-        
-        # 조건: 대시가 자마보다 적고, '암)' 혹은 '@'가 포함된 노드가 모마(Dam)
-        if p_dash_count < f_dash_count and ("암)" in p_text or "@" in p_text):
-            # 모마를 찾았다면, 그 모마보다 대시가 더 적은 직계 상위 노드가 '외조부'
-            grand_curr = curr
-            while grand_curr in parent_map:
-                grand_curr = parent_map[grand_curr]
-                g_text = grand_curr.get('TEXT', '').strip()
-                g_dash_match = re.match(r'^(-+)', g_text)
-                g_dash_count = len(g_dash_match.group(1)) if g_dash_match else 0
-                
-                if g_dash_count < p_dash_count:
-                    return g_text # 이것이 바로 선생님이 찾으시는 최종 외조부 데이터
-            return p_text # 외조부가 없으면 모마 정보라도 반환
-            
-    return "연결 정보 없음"
-
 @st.cache_data
-def run_full_pedigree_system(query):
-    file_path = 'data.mm' # 파일 경로
-    if not os.path.exists(file_path): return None, "데이터 파일이 없습니다."
+def analyze_by_arrowlink(query):
+    file_path = '우수한 경주마(수말, 암말).mm'
+    if not os.path.exists(file_path): return None, "파일을 찾을 수 없습니다."
 
     tree = ET.parse(file_path)
     root = tree.getroot()
-    parent_map = {c: p for p in root.iter() for c in p} # 전체 노드 부모 맵 생성
+    
+    # 1. 고속 추적을 위한 ID 매핑 및 부모 관계도 생성
+    id_map = {n.get('ID'): n for n in root.iter('node') if n.get('ID')}
+    parent_map = {c: p for p in root.iter() for c in p}
 
-    # 1. 씨수말 특정 (검색)
+    # 2. 씨수말(Bernardini) 특정
     target_sire = None
     for node in root.iter('node'):
-        txt = node.get('TEXT', '').strip()
+        txt = node.get('TEXT', '')
         if query.lower() in txt.lower() and node.findall('node'):
             target_sire = node
             break
-    if not target_sire: return None, f"'{query}' 씨수말을 찾을 수 없습니다."
+    if not target_sire: return None, "해당 씨수말을 찾을 수 없습니다."
 
     males, females = [], []
 
-    # 2. 자마 순회 및 대시 논리 적용
+    # 3. 자마 중 arrowlink가 있는 노드만 발췌
     for foal in target_sire.findall('node'):
+        arrow = foal.find('arrowlink')
+        if arrow is None: continue # 화살표 없는 자마는 지시에 따라 제외
+
         f_text = foal.get('TEXT', '').strip()
+        dest_id = arrow.get('DESTINATION')
         
-        # 선생님 지시: 선(화살표나 하위 노드)이 있는 자마만 분석
-        if not foal.findall('node') and not foal.findall('arrowlink'): continue
+        # 4. 화살표를 따라 모마 노드로 점프
+        mom_node = id_map.get(dest_id)
+        bms_info = "연결된 상위 정보 없음"
         
-        # [핵심] 대시 기반 역추적 수행
-        bms_info = trace_bms_by_dash(foal, root, parent_map)
-        
-        display = f"<b>{f_text}</b> <span class='bms-final'>({bms_info})</span>"
+        if mom_node is not None:
+            # 5. 모마의 물리적 부모(외조부) 정보 획득
+            gs_node = parent_map.get(mom_node)
+            if gs_node is not None:
+                bms_info = gs_node.get('TEXT', '').strip()
+
+        # 결과 조립 및 성별 분류
+        display = f"<b>{f_text}</b><br><span class='bms-text'>⮕ {bms_info}</span>"
         
         if "암)" in f_text or "@" in f_text:
             females.append(display)
@@ -84,23 +65,23 @@ def run_full_pedigree_system(query):
             
     return (males, females, target_sire.get('TEXT')), None
 
-# 3. UI 메인 실행
-st.title("🐎 씨수말 닉(Nick) 구조 분석기")
-st.caption("대전제: 대시(-) 개수 비교 및 '암)' 기호 식별을 통한 세대 역추적 로직 적용")
+# --- UI 실행 ---
+st.title("🐎 버나디니(Bernardini) 화살표 경로 추적기")
+st.markdown("<div class='header-info'>지시사항 반영: 화살표(arrowlink)가 있는 자마만 발췌하여 수동 보완된 외조부 정보를 추적합니다.</div>", unsafe_allow_html=True)
 
-query_input = st.text_input("분석할 씨수말 이름을 입력하세요 (예: Bernardini):", "").strip()
+search_name = st.text_input("씨수말 이름을 입력하세요:", "Bernardini")
 
-if query_input:
-    res, err = run_full_pedigree_system(query_input)
+if search_name:
+    res, err = analyze_by_arrowlink(search_name)
     if err:
-        st.warning(err)
+        st.error(err)
     else:
         m, f, s_name = res
-        st.markdown(f'<div class="header-box">📊 {s_name} 분석 완료 (대시 위계 추적 적용)</div>', unsafe_allow_html=True)
+        st.success(f"✅ {s_name} 분석 완료 (화살표 연결 자마: {len(m)+len(f)}두)")
         col1, col2 = st.columns(2)
         with col1:
-            st.info(f"🟦 수말 / BMS 라인 ({len(m)})")
-            for item in m: st.markdown(f'<div class="male-box">🐎 {item}</div>', unsafe_allow_html=True)
+            st.subheader(f"♂️ 아들 자마 ({len(m)})")
+            for item in m: st.markdown(f'<div class="male-box">{item}</div>', unsafe_allow_html=True)
         with col2:
-            st.error(f"🟥 암말 / Sire 라인 ({len(f)})")
-            for item in f: st.markdown(f'<div class="female-box">🐎 {item}</div>', unsafe_allow_html=True)
+            st.subheader(f"♀️ 딸 자마 ({len(f)})")
+            for item in f: st.markdown(f'<div class="female-box">{item}</div>', unsafe_allow_html=True)
