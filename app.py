@@ -50,26 +50,37 @@ def parse(node, parent_id=None):
     for child in node.findall('node'): parse(child, nid)
 parse(root)
 
-# --- 4. 검색 로직 (특수문자 제거 비교) ---
-def clean_text(text):
-    # 모든 특수기호와 공백을 제거하고 소문자로 변환 (비교용)
-    return re.sub(r'[^a-zA-Z0-9가-힣]', '', text).lower()
+# --- 4. 마명 추출 및 검색 로직 (선생님의 규칙 적용) ---
+def get_pure_horse_name(text):
+    # 규칙: 특수기호나 '암)', '수)', '거)' 등을 모두 건너뛰고 
+    # 실제 문자가 2글자 이상 연속되는 지점부터를 마명으로 인식
+    match = re.search(r'[a-zA-Z가-힣]{2,}.*', text)
+    if match:
+        return match.group(0).strip()
+    return text
 
 st.write("### 🔎 씨수말 검색")
-search_input = st.text_input("이름의 일부만 입력하세요 (예: unbridled, medaglia, bern)", "").strip()
+st.info("💡 마명 앞의 기호나 '암)', '수)' 등은 자동으로 제외하고 검색합니다.")
+
+search_input = st.text_input("검색어 입력 (예: bernardini, medaglia, unbridled)", "").strip()
 
 if search_input:
-    clean_query = clean_text(search_input)
-    # 파일 내 이름들 중 검색어가 포함된 것들 추출
-    matched_names = [name for name in sorted(list(all_horse_names)) if clean_query in clean_text(name)]
+    clean_query = search_input.lower().replace(" ", "")
+    matched_names = []
+    
+    for original_name in sorted(list(all_horse_names)):
+        # 원본 이름에서 규칙에 따라 마명 부분만 추출
+        pure_name = get_pure_horse_name(original_name).lower().replace(" ", "")
+        
+        # 추출된 마명에 검색어가 포함되어 있는지 확인
+        if clean_query in pure_name:
+            matched_names.append(original_name)
     
     if not matched_names:
         st.warning(f"❌ '{search_input}'이(가) 포함된 이름을 찾을 수 없습니다.")
     else:
-        # 검색된 결과 선택박스
-        selected_name = st.selectbox(f"🔍 {len(matched_names)}마리 발견! 정확한 이름을 선택하세요:", matched_names)
+        selected_name = st.selectbox(f"🔍 {len(matched_names)}마리 발견! 정확한 마명을 선택하세요:", matched_names)
         
-        # 선택된 말 ID 찾기
         target_ids = [nid for nid, info in nodes.items() if info['name'] == selected_name]
         sire_id = target_ids[0]
         
@@ -99,10 +110,10 @@ if search_input:
         st.success(f"✅ **{selected_name}** 분석 결과")
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown(f"<div class='header' style='color:#2b6cb0;'>🟦 수말 자마 (Sons: {len(colts)})</div>", unsafe_allow_html=True)
+            st.markdown(f"### 🟦 수말 자마 (Sons: {len(colts)})")
             for c in colts:
                 st.markdown(f"<div class='card male-card'><div class='main-text'>🐎 {c['child']}</div><div class='sub-text'>어미: {c['link_info']}<br>👉 <b>BMS: <span class='highlight'>{c['bms']}</span></b></div></div>", unsafe_allow_html=True)
         with c2:
-            st.markdown(f"<div class='header' style='color:#d53f8c;'>🩷 암말 자마 (Daughters: {len(fillies)})</div>", unsafe_allow_html=True)
+            st.markdown(f"### 🩷 암말 자마 (Daughters: {len(fillies)})")
             for f in fillies:
                 st.markdown(f"<div class='card female-card'><div class='main-text'>🎀 {f['child']}</div><div class='sub-text'>자마: {f['link_info']}<br>👉 <b>Sire: <span class='highlight'>{f['partner']}</span></b></div></div>", unsafe_allow_html=True)
