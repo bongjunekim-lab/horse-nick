@@ -2,8 +2,9 @@ import streamlit as st
 import xml.etree.ElementTree as ET
 import os
 
-# 페이지 설정
-st.set_page_config(page_title="씨수말 닉 분석기 (Speed)", layout="wide")
+st.set_page_config(page_title="씨수말 닉 분석기 (Final)", layout="wide")
+
+# 스타일 설정 (선생님이 만족하신 박스 디자인)
 st.markdown("""
     <style>
     .male-box { background-color: #e8f0fe; padding: 10px; border-radius: 5px; margin-bottom: 5px; border-left: 5px solid #4285f4; color: black; }
@@ -12,99 +13,100 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🐎 씨수말 닉(Nick) 분석기 (초고속 모드)")
+st.title("🐎 씨수말 닉(Nick) 연결 분석기")
 
-# --- 1단계: 이름만 빨리 가져오기 (가볍게!) ---
+# --- 1. 이름 로딩 (검색용) ---
 @st.cache_data
-def get_horse_names_only():
+def load_names():
     if not os.path.exists('data.mm'): return []
-    # 파일을 엽니다.
     tree = ET.parse('data.mm')
     root = tree.getroot()
-    
-    # 자마 정보는 무시하고, '씨수말 이름'만 쏙쏙 뽑아냅니다.
     names = set()
     for node in root.iter('node'):
-        text = node.get('TEXT', '').strip()
-        if text:
-            names.add(text)
+        t = node.get('TEXT', '').strip()
+        if t: names.add(t)
     return sorted(list(names))
 
-# 로딩 시작 (이젠 금방 끝날 겁니다)
-all_names = get_horse_names_only()
+all_names = load_names()
 
-# --- 2단계: 검색창 ---
+# --- 2. 검색창 ---
 st.write("### 1. 씨수말 검색")
-# 검색어 입력 전에는 전체 리스트를 보여주지 않아 속도를 더 높입니다.
-query = st.text_input("마명을 입력하세요 (예: pulpit):", "").strip()
+query = st.text_input("마명을 입력하세요 (예: northern dancer):", "").strip()
 
 selected_horse = None
-
 if query:
-    # 입력한 글자가 포함된 이름만 찾습니다.
-    matches = [name for name in all_names if query.lower() in name.lower()]
-    
+    matches = [n for n in all_names if query.lower() in n.lower()]
     if matches:
         selected_horse = st.selectbox(f"✅ {len(matches)}두 검색됨. 선택하세요:", matches)
     else:
         st.warning("검색 결과가 없습니다.")
 
-# --- 3단계: 선택했을 때만! 정밀 분석 시작 (On-Demand) ---
+# --- 3. [핵심] 전수 조사 및 연결(Line) 필터링 ---
 if selected_horse:
-    # ★ 여기서 파일을 다시 열어서 '그 말'의 정보만 쏙 빼옵니다.
-    # 전체를 다 외우는 것보다, 필요할 때 책을 펴서 찾는 게 훨씬 빠릅니다.
+    # 파일을 다시 엽니다.
     tree = ET.parse('data.mm')
     root = tree.getroot()
     
-    target_node = None
-    # 2만 개 중 선택한 말의 위치를 찾습니다.
+    # 1. 이름이 똑같은 노드를 '전부' 찾습니다. (가장이든, 자식이든 상관없이 다 찾음)
+    target_nodes = []
     for node in root.iter('node'):
         if node.get('TEXT', '').strip() == selected_horse:
-            target_node = node
-            break
+            target_nodes.append(node)
             
-    if target_node:
+    if target_nodes:
+        males = []   # BMS 연결
+        females = [] # Sire 연결
+        
+        # 2. 찾아낸 모든 노드의 자식들을 하나하나 검사합니다.
+        for parent in target_nodes:
+            children = parent.findall('node')
+            for child in children:
+                text = child.get('TEXT', '').strip()
+                
+                # ★ 대 전제 적용: 연결(Line)이 없으면 가차 없이 버린다.
+                # 중복 방지를 위해 이미 찾은 리스트에 없으면 추가
+                
+                # 수말 조건: BMS가 있어야 한다.
+                if ("BMS" in text or "bms" in text) and (text not in males):
+                    males.append(text)
+                
+                # 암말 조건: Sire가 있어야 한다.
+                elif ("Sire" in text or "sire" in text) and (text not in females):
+                    females.append(text)
+        
+        # --- 4. 결과 출력 ---
         st.markdown("---")
-        st.write(f"### 2. {selected_horse} 상세 분석 결과")
         
-        # 자마들 수집 및 분류 (선생님의 핵심 로직)
-        males = []
-        females = []
-        
-        children = target_node.findall('node')
-        for child in children:
-            text = child.get('TEXT', '').strip()
-            
-            # 족보 연결(Line) 필터링
-            if "BMS" in text or "bms" in text:
-                males.append(text)
-            elif "Sire" in text or "sire" in text:
-                females.append(text)
-            # 족보 없는 껍데기는 버림
-            
-        # 결과 출력
         total = len(males) + len(females)
         
-        st.markdown(f"""
-        <div class="header-box">
-            📊 분석 요약: 수말(BMS) {len(males)}두 / 암말(Sire) {len(females)}두 (유효 자마 총 {total}두)
-        </div>
-        """, unsafe_allow_html=True)
-
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.info(f"🟦 **수말 (BMS 연결)**")
-            if males:
-                for h in males:
-                    st.markdown(f'<div class="male-box">{h}</div>', unsafe_allow_html=True)
-            else:
-                st.write("데이터 없음")
-                
-        with col2:
-            st.error(f"🟥 **암말 (Sire 연결)**")
-            if females:
-                for h in females:
-                    st.markdown(f'<div class="female-box">{h}</div>', unsafe_allow_html=True)
-            else:
-                st.write("데이터 없음")
+        # 데이터가 하나라도 있으면 출력, 없으면 경고
+        if total > 0:
+            st.markdown(f"""
+            <div class="header-box">
+                📊 {selected_horse} 분석 결과: 수말(BMS) {len(males)}두 / 암말(Sire) {len(females)}두 (연결된 자마 총 {total}두)
+            </div>
+            """, unsafe_allow_html=True)
+            
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.info("🟦 **수말 (BMS 연결)**")
+                if males:
+                    for h in males:
+                        st.markdown(f'<div class="male-box">{h}</div>', unsafe_allow_html=True)
+                else:
+                    st.write("데이터 없음")
+                    
+            with col2:
+                st.error("🟥 **암말 (Sire 연결)**")
+                if females:
+                    for h in females:
+                        st.markdown(f'<div class="female-box">{h}</div>', unsafe_allow_html=True)
+                else:
+                    st.write("데이터 없음")
+        else:
+            st.warning(f"⚠️ '{selected_horse}'의 이름은 찾았으나, BMS나 Sire로 연결된 자마 데이터가 하나도 없습니다.")
+            st.write("Tip: 데이터 파일에 'BMS:'나 'Sire:' 정보가 정확히 기입되어 있는지 확인해주세요.")
+            
+    else:
+        st.error("오류: 노드를 찾을 수 없습니다.")
