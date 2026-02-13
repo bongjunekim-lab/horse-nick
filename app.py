@@ -1,7 +1,6 @@
 import streamlit as st
 import xml.etree.ElementTree as ET
 import os
-import re
 from collections import defaultdict
 
 # --- 1. 화면 설정 ---
@@ -17,7 +16,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🐎 씨수말 닉(Nick) 분석기 (심도 검색 통합본)")
+st.title("🐎 씨수말 닉(Nick) 분석기 (대소문자 완전 무시 버전)")
 
 # --- 2. 데이터 로딩 ---
 file_path = 'data.mm'
@@ -44,32 +43,39 @@ def parse(node, parent_id=None):
     for child in node.findall('node'): parse(child, nid)
 parse(root)
 
-# --- 4. ★핵심: 대소문자/기호 완전 무시 함수 ---
-def get_search_key(text):
-    # 모든 특수기호, 공백, 숫자를 제거하고 순수 글자만 소문자로 반환
-    return re.sub(r'[^a-zA-Z가-힣]', '', text).lower()
+# --- 4. ★ 초강력 알맹이 추출 함수 (정규식 미사용) ---
+def make_pure_key(text):
+    """
+    모든 기호, 공백, 따옴표를 버리고 
+    오직 영문(소문자화)과 한글, 숫자만 남겨서 반환합니다.
+    """
+    pure = ""
+    for char in text:
+        if char.isalnum(): # 알파벳 또는 숫자인가?
+            pure += char.lower()
+    return pure
 
 # --- 5. 검색창 구현 ---
-st.write("### 🔎 심도 검색창")
-st.info("💡 이제 대소문자나 따옴표 상관없이 **소문자로 이름만** 입력하세요.")
+st.write("### 🔎 통합 검색")
+st.warning("이제 'medagl', 'pulpit', 'tiznow' 등 **무조건 소문자**로만 입력해보세요.")
 
-query_input = st.text_input("마명 입력 (예: medaglia, unbridled, pulpit, tiznow)", "").strip()
+query_input = st.text_input("마명 입력", "").strip()
 
 if query_input:
-    # 사용자 입력값도 알맹이만 추출
-    clean_query = get_search_key(query_input)
+    # 사용자 입력값 정제
+    clean_query = make_pure_key(query_input)
     
-    # 알맹이 비교로 검색
+    # 알맹이 비교로 검색 수행
     matched_names = []
     if clean_query:
         for name in sorted(list(all_horse_names)):
-            if clean_query in get_search_key(name):
+            # 파일 내 마명도 정제하여 비교
+            if clean_query in make_pure_key(name):
                 matched_names.append(name)
             
     if not matched_names:
-        st.warning(f"❌ '{query_input}' 검색 결과가 없습니다.")
+        st.error(f"❌ '{query_input}' 검색 결과가 없습니다. (정제 키: {clean_query})")
     else:
-        # 검색된 결과 선택
         selected_name = st.selectbox(f"🔍 {len(matched_names)}마리 발견! 정확한 마명을 선택하세요:", matched_names)
         
         # 분석 실행
@@ -86,15 +92,17 @@ if query_input:
                 if child_id in arrows_in:
                     for mom_id in arrows_in[child_id]:
                         if mom_id in nodes:
-                            bms = nodes[nodes[mom_id]['parent']]['name'] if nodes[m_id]['parent'] in nodes else "?"
-                            colts.append({'child': name, 'bms': bms, 'mom': nodes[mom_id]['name']})
+                            bms_id = nodes[mom_id]['parent']
+                            bms_name = nodes[bms_id]['name'] if bms_id in nodes else "?"
+                            colts.append({'child': name, 'bms': bms_name, 'mom': nodes[mom_id]['name']})
                             seen.add(child_id)
             else:
                 if child_id in arrows_out:
                     for foal_id in arrows_out[child_id]:
                         if foal_id in nodes:
-                            sire = nodes[nodes[foal_id]['parent']]['name'] if nodes[f_id]['parent'] in nodes else "?"
-                            fillies.append({'child': name, 'sire': sire, 'foal': nodes[foal_id]['name']})
+                            partner_id = nodes[foal_id]['parent']
+                            partner_name = nodes[partner_id]['name'] if partner_id in nodes else "?"
+                            fillies.append({'child': name, 'sire': partner_name, 'foal': nodes[foal_id]['name']})
                             seen.add(child_id)
 
         st.success(f"✅ **{selected_name}** 분석 완료")
@@ -102,8 +110,8 @@ if query_input:
         with c1:
             st.markdown(f"### 🟦 수말 자마 (Sons)")
             for c in colts:
-                st.markdown(f"<div class='card male-card'><div class='main-text'>🐎 {c['child']}</div><div class='sub-text'>BMS: <span class='highlight'>{c['bms']}</span></div></div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='card male-card'><div class='main-text'>🐎 {c['child']}</div><div class='sub-text'>BMS: <span class='highlight'>{c['bms']}</span> (어미: {c['mom']})</div></div>", unsafe_allow_html=True)
         with c2:
             st.markdown(f"### 🩷 암말 자마 (Daughters)")
             for f in fillies:
-                st.markdown(f"<div class='card female-card'><div class='main-text'>🎀 {f['child']}</div><div class='sub-text'>Sire: <span class='highlight'>{f['sire']}</span></div></div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='card female-card'><div class='main-text'>🎀 {f['child']}</div><div class='sub-text'>Sire: <span class='highlight'>{f['sire']}</span> (자마: {f['foal']})</div></div>", unsafe_allow_html=True)
