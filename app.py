@@ -1,6 +1,7 @@
 import streamlit as st
 import xml.etree.ElementTree as ET
 import os
+import re
 from collections import defaultdict
 
 # --- 1. 화면 설정 ---
@@ -49,21 +50,26 @@ def parse(node, parent_id=None):
     for child in node.findall('node'): parse(child, nid)
 parse(root)
 
-# --- 4. 스마트 검색창 (여기가 핵심) ---
+# --- 4. 검색 로직 (특수문자 제거 비교) ---
+def clean_text(text):
+    # 모든 특수기호와 공백을 제거하고 소문자로 변환 (비교용)
+    return re.sub(r'[^a-zA-Z0-9가-힣]', '', text).lower()
+
 st.write("### 🔎 씨수말 검색")
-search_input = st.text_input("말 이름의 일부를 입력하세요 (예: bernardini 또는 ber)", "").strip()
+search_input = st.text_input("이름의 일부만 입력하세요 (예: unbridled, medaglia, bern)", "").strip()
 
 if search_input:
-    # ★ 대소문자 가리지 않고 이름 중간에 글자가 포함되면 다 찾기
-    matched_names = [name for name in sorted(list(all_horse_names)) if search_input.lower() in name.lower()]
+    clean_query = clean_text(search_input)
+    # 파일 내 이름들 중 검색어가 포함된 것들 추출
+    matched_names = [name for name in sorted(list(all_horse_names)) if clean_query in clean_text(name)]
     
     if not matched_names:
         st.warning(f"❌ '{search_input}'이(가) 포함된 이름을 찾을 수 없습니다.")
     else:
-        # 검색된 결과가 있으면 선택박스로 보여주기
-        selected_name = st.selectbox(f"🔍 {len(matched_names)}마리가 검색되었습니다. 아래에서 선택하세요:", matched_names)
+        # 검색된 결과 선택박스
+        selected_name = st.selectbox(f"🔍 {len(matched_names)}마리 발견! 정확한 이름을 선택하세요:", matched_names)
         
-        # 선택된 말 분석 시작
+        # 선택된 말 ID 찾기
         target_ids = [nid for nid, info in nodes.items() if info['name'] == selected_name]
         sire_id = target_ids[0]
         
