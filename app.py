@@ -2,9 +2,9 @@ import streamlit as st
 import xml.etree.ElementTree as ET
 import os
 
-st.set_page_config(page_title="씨수말 닉 분석기 (Final)", layout="wide")
+st.set_page_config(page_title="씨수말 닉 분석기 (Direct)", layout="wide")
 
-# 스타일 설정 (선생님이 만족하신 박스 디자인)
+# 스타일: 선생님이 원하시는 박스 디자인 유지
 st.markdown("""
     <style>
     .male-box { background-color: #e8f0fe; padding: 10px; border-radius: 5px; margin-bottom: 5px; border-left: 5px solid #4285f4; color: black; }
@@ -13,100 +13,82 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🐎 씨수말 닉(Nick) 연결 분석기")
+st.title("🐎 씨수말 닉(Nick) 다이렉트 분석기")
+st.caption("선택 과정 없이, 검색어와 일치하는 모든 씨수말의 자마를 통합하여 보여줍니다.")
 
-# --- 1. 이름 로딩 (검색용) ---
-@st.cache_data
-def load_names():
-    if not os.path.exists('data.mm'): return []
-    tree = ET.parse('data.mm')
-    root = tree.getroot()
-    names = set()
-    for node in root.iter('node'):
-        t = node.get('TEXT', '').strip()
-        if t: names.add(t)
-    return sorted(list(names))
+# --- 1. 데이터 로드 (필요할 때 읽기) ---
+# 검색어가 입력되면 그때 파일을 엽니다.
+query = st.text_input("분석할 씨수말 이름을 입력하세요 (예: Tapit, Pulpit):", "").strip()
 
-all_names = load_names()
-
-# --- 2. 검색창 ---
-st.write("### 1. 씨수말 검색")
-query = st.text_input("마명을 입력하세요 (예: northern dancer):", "").strip()
-
-selected_horse = None
 if query:
-    matches = [n for n in all_names if query.lower() in n.lower()]
-    if matches:
-        selected_horse = st.selectbox(f"✅ {len(matches)}두 검색됨. 선택하세요:", matches)
+    if not os.path.exists('data.mm'):
+        st.error("데이터 파일(data.mm)이 없습니다.")
     else:
-        st.warning("검색 결과가 없습니다.")
-
-# --- 3. [핵심] 전수 조사 및 연결(Line) 필터링 ---
-if selected_horse:
-    # 파일을 다시 엽니다.
-    tree = ET.parse('data.mm')
-    root = tree.getroot()
-    
-    # 1. 이름이 똑같은 노드를 '전부' 찾습니다. (가장이든, 자식이든 상관없이 다 찾음)
-    target_nodes = []
-    for node in root.iter('node'):
-        if node.get('TEXT', '').strip() == selected_horse:
-            target_nodes.append(node)
+        tree = ET.parse('data.mm')
+        root = tree.getroot()
+        
+        males = []   # BMS 연결된 수말 모음
+        females = [] # Sire 연결된 암말 모음
+        
+        found_parents_count = 0
+        
+        # --- 2. [핵심] 통합 검색 로직 ---
+        # 드롭다운 없이, 전체 데이터에서 이름이 매칭되는 모든 부모를 찾습니다.
+        for node in root.iter('node'):
+            parent_name = node.get('TEXT', '').strip()
             
-    if target_nodes:
-        males = []   # BMS 연결
-        females = [] # Sire 연결
+            # 검색어가 이름에 포함되어 있으면 (대소문자 무시) 내 식구로 간주합니다.
+            if query.lower() in parent_name.lower():
+                # 자식이 있는지 확인
+                children = node.findall('node')
+                if children:
+                    found_parents_count += 1
+                    
+                    for child in children:
+                        text = child.get('TEXT', '').strip()
+                        
+                        # ★ 대 전제: 연결(Line) 확인
+                        # 중복 방지 (이미 리스트에 있으면 넣지 않음)
+                        
+                        # 1. 수말 (BMS)
+                        if ("BMS" in text or "bms" in text):
+                            if text not in males:
+                                males.append(text)
+                        
+                        # 2. 암말 (Sire)
+                        elif ("Sire" in text or "sire" in text):
+                            if text not in females:
+                                females.append(text)
         
-        # 2. 찾아낸 모든 노드의 자식들을 하나하나 검사합니다.
-        for parent in target_nodes:
-            children = parent.findall('node')
-            for child in children:
-                text = child.get('TEXT', '').strip()
-                
-                # ★ 대 전제 적용: 연결(Line)이 없으면 가차 없이 버린다.
-                # 중복 방지를 위해 이미 찾은 리스트에 없으면 추가
-                
-                # 수말 조건: BMS가 있어야 한다.
-                if ("BMS" in text or "bms" in text) and (text not in males):
-                    males.append(text)
-                
-                # 암말 조건: Sire가 있어야 한다.
-                elif ("Sire" in text or "sire" in text) and (text not in females):
-                    females.append(text)
-        
-        # --- 4. 결과 출력 ---
-        st.markdown("---")
-        
+        # --- 3. 결과 출력 ---
         total = len(males) + len(females)
         
-        # 데이터가 하나라도 있으면 출력, 없으면 경고
+        st.markdown("---")
+        
         if total > 0:
+            # 통합 결과 요약
             st.markdown(f"""
             <div class="header-box">
-                📊 {selected_horse} 분석 결과: 수말(BMS) {len(males)}두 / 암말(Sire) {len(females)}두 (연결된 자마 총 {total}두)
+                📊 '{query}' 통합 분석 결과: 수말(BMS) {len(males)}두 / 암말(Sire) {len(females)}두 (총 {total}두)
             </div>
             """, unsafe_allow_html=True)
             
             col1, col2 = st.columns(2)
             
+            # 왼쪽: 수말
             with col1:
-                st.info("🟦 **수말 (BMS 연결)**")
-                if males:
-                    for h in males:
-                        st.markdown(f'<div class="male-box">{h}</div>', unsafe_allow_html=True)
-                else:
-                    st.write("데이터 없음")
-                    
+                st.info(f"🟦 **수말 (BMS 연결)**")
+                for h in males:
+                    st.markdown(f'<div class="male-box">{h}</div>', unsafe_allow_html=True)
+
+            # 오른쪽: 암말
             with col2:
-                st.error("🟥 **암말 (Sire 연결)**")
-                if females:
-                    for h in females:
-                        st.markdown(f'<div class="female-box">{h}</div>', unsafe_allow_html=True)
-                else:
-                    st.write("데이터 없음")
+                st.error(f"🟥 **암말 (Sire 연결)**")
+                for h in females:
+                    st.markdown(f'<div class="female-box">{h}</div>', unsafe_allow_html=True)
+                    
         else:
-            st.warning(f"⚠️ '{selected_horse}'의 이름은 찾았으나, BMS나 Sire로 연결된 자마 데이터가 하나도 없습니다.")
-            st.write("Tip: 데이터 파일에 'BMS:'나 'Sire:' 정보가 정확히 기입되어 있는지 확인해주세요.")
-            
-    else:
-        st.error("오류: 노드를 찾을 수 없습니다.")
+            if found_parents_count > 0:
+                st.warning(f"⚠️ '{query}' 이름의 말은 {found_parents_count}마리 찾았으나, BMS나 Sire로 연결된 자마가 하나도 없습니다.")
+            else:
+                st.warning(f"❌ '{query}' 검색 결과가 없습니다.")
