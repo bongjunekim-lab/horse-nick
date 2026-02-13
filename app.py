@@ -2,23 +2,22 @@ import streamlit as st
 import xml.etree.ElementTree as ET
 import os
 
-st.set_page_config(page_title="씨수말 닉 분석기 (Direct)", layout="wide")
+st.set_page_config(page_title="씨수말 닉 분석기 (Final)", layout="wide")
 
-# 스타일: 선생님이 원하시는 박스 디자인 유지
+# 스타일: 선생님이 "성공했다"고 하셨던 그 화면 디자인 (파랑/빨강 박스)
 st.markdown("""
     <style>
-    .male-box { background-color: #e8f0fe; padding: 10px; border-radius: 5px; margin-bottom: 5px; border-left: 5px solid #4285f4; color: black; }
-    .female-box { background-color: #fce8e6; padding: 10px; border-radius: 5px; margin-bottom: 5px; border-left: 5px solid #ea4335; color: black; }
+    .male-box { background-color: #e8f0fe; padding: 10px; border-radius: 5px; margin-bottom: 5px; border-left: 5px solid #4285f4; color: black; font-size: 14px; }
+    .female-box { background-color: #fce8e6; padding: 10px; border-radius: 5px; margin-bottom: 5px; border-left: 5px solid #ea4335; color: black; font-size: 14px; }
     .header-box { background-color: #f0fff4; padding: 15px; border-radius: 10px; border: 1px solid #48bb78; color: #2f855a; font-weight: bold; margin-bottom: 20px;}
     </style>
 """, unsafe_allow_html=True)
 
-st.title("🐎 씨수말 닉(Nick) 다이렉트 분석기")
-st.caption("선택 과정 없이, 검색어와 일치하는 모든 씨수말의 자마를 통합하여 보여줍니다.")
+st.title("🐎 씨수말 닉(Nick) 혈통 연결 분석기")
+st.caption("가장 많은 자마와 연결된 '진짜 씨수말'을 찾아 BMS와 Sire 라인을 분석합니다.")
 
-# --- 1. 데이터 로드 (필요할 때 읽기) ---
-# 검색어가 입력되면 그때 파일을 엽니다.
-query = st.text_input("분석할 씨수말 이름을 입력하세요 (예: Tapit, Pulpit):", "").strip()
+# 1. 검색창
+query = st.text_input("분석할 씨수말 이름을 입력하세요 (예: Tapit, Street cry):", "").strip()
 
 if query:
     if not os.path.exists('data.mm'):
@@ -27,68 +26,74 @@ if query:
         tree = ET.parse('data.mm')
         root = tree.getroot()
         
-        males = []   # BMS 연결된 수말 모음
-        females = [] # Sire 연결된 암말 모음
+        # --- 1단계: '진짜 부모' 찾기 (자식이 제일 많은 놈이 범인입니다) ---
+        candidates = []
         
-        found_parents_count = 0
-        
-        # --- 2. [핵심] 통합 검색 로직 ---
-        # 드롭다운 없이, 전체 데이터에서 이름이 매칭되는 모든 부모를 찾습니다.
         for node in root.iter('node'):
-            parent_name = node.get('TEXT', '').strip()
-            
-            # 검색어가 이름에 포함되어 있으면 (대소문자 무시) 내 식구로 간주합니다.
-            if query.lower() in parent_name.lower():
-                # 자식이 있는지 확인
-                children = node.findall('node')
-                if children:
-                    found_parents_count += 1
-                    
-                    for child in children:
-                        text = child.get('TEXT', '').strip()
-                        
-                        # ★ 대 전제: 연결(Line) 확인
-                        # 중복 방지 (이미 리스트에 있으면 넣지 않음)
-                        
-                        # 1. 수말 (BMS)
-                        if ("BMS" in text or "bms" in text):
-                            if text not in males:
-                                males.append(text)
-                        
-                        # 2. 암말 (Sire)
-                        elif ("Sire" in text or "sire" in text):
-                            if text not in females:
-                                females.append(text)
+            name = node.get('TEXT', '').strip()
+            # 이름이 비슷하면 일단 후보로 등록
+            if query.lower() in name.lower():
+                # 자식 수 확인
+                child_count = len(node.findall('node'))
+                candidates.append((node, child_count, name))
         
-        # --- 3. 결과 출력 ---
-        total = len(males) + len(females)
-        
-        st.markdown("---")
-        
-        if total > 0:
-            # 통합 결과 요약
-            st.markdown(f"""
-            <div class="header-box">
-                📊 '{query}' 통합 분석 결과: 수말(BMS) {len(males)}두 / 암말(Sire) {len(females)}두 (총 {total}두)
-            </div>
-            """, unsafe_allow_html=True)
-            
-            col1, col2 = st.columns(2)
-            
-            # 왼쪽: 수말
-            with col1:
-                st.info(f"🟦 **수말 (BMS 연결)**")
-                for h in males:
-                    st.markdown(f'<div class="male-box">{h}</div>', unsafe_allow_html=True)
-
-            # 오른쪽: 암말
-            with col2:
-                st.error(f"🟥 **암말 (Sire 연결)**")
-                for h in females:
-                    st.markdown(f'<div class="female-box">{h}</div>', unsafe_allow_html=True)
-                    
+        if not candidates:
+            st.warning(f"❌ '{query}'라는 이름의 말을 찾을 수 없습니다.")
         else:
-            if found_parents_count > 0:
-                st.warning(f"⚠️ '{query}' 이름의 말은 {found_parents_count}마리 찾았으나, BMS나 Sire로 연결된 자마가 하나도 없습니다.")
+            # ★ 핵심: 자식이 가장 많은 후보를 '진짜'로 선택 (자동 선택)
+            # 이렇게 하면 자식 없는 껍데기 Tapit은 자연스럽게 탈락합니다.
+            best_node, max_children, best_name = max(candidates, key=lambda x: x[1])
+            
+            if max_children == 0:
+                 st.warning(f"⚠️ '{query}' 이름은 찾았으나, 연결된 자마(Line)가 하나도 없습니다.")
             else:
-                st.warning(f"❌ '{query}' 검색 결과가 없습니다.")
+                # --- 2단계: 줄(Line)이 있는 자마만 분류 ---
+                males = []   # BMS 라인
+                females = [] # Sire 라인
+                
+                children = best_node.findall('node')
+                for child in children:
+                    text = child.get('TEXT', '').strip()
+                    text_upper = text.upper() # 대소문자 무시용
+                    
+                    # 선생님 말씀대로 '선으로 연결된' 정보가 있는지 확인
+                    
+                    # 수말 조건: (BMS: ...) 가 붙어 있는가?
+                    if "BMS" in text_upper:
+                        males.append(text)
+                    
+                    # 암말 조건: (Sire: ...) 가 붙어 있는가?
+                    elif "SIRE" in text_upper:
+                        females.append(text)
+                
+                # --- 3단계: 결과 출력 ---
+                total_valid = len(males) + len(females)
+                
+                st.markdown("---")
+                # 초록색 요약 바
+                st.markdown(f"""
+                <div class="header-box">
+                    📊 분석 대상: {best_name} <br>
+                    ✅ 연결된 자마: 수말(BMS) {len(males)}두 / 암말(Sire) {len(females)}두 (총 {total_valid}두)
+                </div>
+                """, unsafe_allow_html=True)
+                
+                col1, col2 = st.columns(2)
+                
+                # 왼쪽: 수말 (파란색)
+                with col1:
+                    st.info(f"🟦 **수말 (Colts) - BMS(외조부) 연결**")
+                    if males:
+                        for h in males:
+                            st.markdown(f'<div class="male-box">{h}</div>', unsafe_allow_html=True)
+                    else:
+                        st.write("데이터 없음")
+                
+                # 오른쪽: 암말 (빨간색)
+                with col2:
+                    st.error(f"🟥 **암말 (Fillies) - Sire(부마) 연결**")
+                    if females:
+                        for h in females:
+                            st.markdown(f'<div class="female-box">{h}</div>', unsafe_allow_html=True)
+                    else:
+                        st.write("데이터 없음")
