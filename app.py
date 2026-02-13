@@ -3,7 +3,7 @@ import xml.etree.ElementTree as ET
 import os
 from collections import defaultdict
 
-# --- 1. 화면 설정 (깔끔하게) ---
+# --- 1. 화면 설정 ---
 st.set_page_config(page_title="씨수말 닉 분석기", layout="wide")
 
 st.markdown("""
@@ -15,12 +15,13 @@ st.markdown("""
     .main-text { font-size: 1.1em; font-weight: bold; color: #333; }
     .sub-text { font-size: 0.9em; color: #666; margin-top: 5px; }
     .highlight { color: #c53030; font-weight: bold; }
+    /* 파란 박스(st.info) 같은 건 이제 안 나오게 스타일 조정 */
 </style>
 """, unsafe_allow_html=True)
 
 st.title("🐎 씨수말 닉(Nick) 분석기")
 
-# --- 2. 데이터 로딩 (조용히 실행) ---
+# --- 2. 데이터 로딩 (파란 박스 X-ray 화면 제거함) ---
 file_path = 'data.mm'
 
 if not os.path.exists(file_path):
@@ -39,7 +40,7 @@ except Exception as e:
 nodes = {}
 arrows_in = defaultdict(list)
 arrows_out = defaultdict(list)
-all_horse_names = set() # 검색용 명단 만들기
+all_horse_names = set() 
 
 def parse(node, parent_id=None):
     nid = node.get('ID')
@@ -47,8 +48,8 @@ def parse(node, parent_id=None):
     
     if nid:
         nodes[nid] = {'name': text, 'parent': parent_id}
-        # 이름이 있고, 너무 짧거나(1글자) 이상한 기호만 있는 게 아니면 명단에 추가
-        if len(text) > 1: 
+        # 이름이 너무 짧거나(1글자) 이상한 건 명단에서 제외
+        if len(text) > 1 and "굵게" not in text and "sansserif" not in text.lower(): 
             all_horse_names.add(text)
             
         for arrow in node.findall('arrowlink'):
@@ -65,28 +66,28 @@ parse(root)
 # 명단 가나다순 정렬 (찾기 쉽게)
 sorted_names = sorted(list(all_horse_names))
 
-# --- 4. 검색 화면 (자동완성 기능) ---
-st.write("분석하고 싶은 **씨수말 이름**을 선택하거나 타이핑하세요. (일부만 쳐도 나옵니다)")
+# --- 4. 검색 화면 (여기가 핵심!) ---
+st.write("👇 아래 상자를 클릭하고 **'ber'**나 **'버나'**라고 타이핑해보세요. 목록이 자동으로 뜹니다.")
 
-# ★ 핵심: 텍스트 입력창 대신 '선택 박스' 사용
-# 사용자가 'Ber'라고 치면 목록에서 'Bernardini'를 찾아줍니다.
+# ★ 검색창을 '선택 상자(Selectbox)'로 만들었습니다.
+# 이제 타이핑하면 목록 중에서 찾아줍니다.
 selected_name = st.selectbox(
-    "검색할 말을 선택하세요:", 
-    options=["(말을 선택해주세요)"] + sorted_names, # 첫 번째는 안내 문구
+    label="검색할 말을 선택하세요:", 
+    options=["(여기를 클릭해서 입력하세요)"] + sorted_names, 
     index=0
 )
 
-# 사용자가 말을 선택했을 때만 분석 시작
-if selected_name != "(말을 선택해주세요)":
-    
-    # 선택된 이름에 해당하는 모든 ID 찾기
+# --- 5. 결과 보여주기 ---
+if selected_name == "(여기를 클릭해서 입력하세요)":
+    st.info("👆 위 칸에 씨수말 이름을 입력하면 결과가 나옵니다.")
+else:
+    # 선택된 이름으로 데이터 찾기
     target_ids = [nid for nid, info in nodes.items() if info['name'] == selected_name]
     
     if not target_ids:
-        st.warning("데이터 연결 오류: 이름을 찾았으나 ID를 매칭하지 못했습니다.")
+        st.error("데이터 오류: 이름을 선택했는데 ID를 못 찾았습니다.")
     else:
-        # 첫 번째 매칭된 ID 사용
-        sire_id = target_ids[0]
+        sire_id = target_ids[0] # 첫 번째 매칭되는 ID 사용
         
         colts = []; fillies = []; seen = set()
         children = [nid for nid, info in nodes.items() if info['parent'] == sire_id]
@@ -129,7 +130,7 @@ if selected_name != "(말을 선택해주세요)":
                     </div>
                     """, unsafe_allow_html=True)
             else:
-                st.info("데이터 없음")
+                st.write("데이터 없음")
 
         with c2:
             st.markdown(f"<div class='header' style='color:#d53f8c;'>🩷 암말 자마 (Daughters: {len(fillies)})</div>", unsafe_allow_html=True)
@@ -145,4 +146,4 @@ if selected_name != "(말을 선택해주세요)":
                     </div>
                     """, unsafe_allow_html=True)
             else:
-                st.info("데이터 없음")
+                st.write("데이터 없음")
