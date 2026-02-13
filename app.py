@@ -62,7 +62,7 @@ def parse(node, parent_id=None):
 
 parse(root)
 
-# 명단 가나다순 정렬
+# 명단 가나다순 정렬 (찾기 쉽게)
 sorted_names = sorted(list(all_horse_names))
 
 # --- 4. 검색 화면 (자동완성 기능) ---
