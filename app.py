@@ -3,7 +3,7 @@ import xml.etree.ElementTree as ET
 import os
 from collections import defaultdict
 
-# --- 1. 페이지 설정 ---
+# --- 1. 화면 설정 (깔끔하게) ---
 st.set_page_config(page_title="씨수말 닉 분석기", layout="wide")
 
 st.markdown("""
@@ -19,7 +19,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🐎 씨수말 닉(Nick) 분석기")
-st.write("분석하고 싶은 **씨수말 이름**을 입력하세요.")
 
 # --- 2. 데이터 로딩 (조용히 실행) ---
 file_path = 'data.mm'
@@ -29,7 +28,6 @@ if not os.path.exists(file_path):
     st.stop()
 
 try:
-    # 특수문자 깨짐 방지하며 읽기
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
         xml_content = f.read()
     root = ET.fromstring(xml_content)
@@ -37,51 +35,61 @@ except Exception as e:
     st.error(f"❌ 데이터 읽기 오류: {e}")
     st.stop()
 
-# --- 3. 데이터 분석 ---
+# --- 3. 데이터 분석 및 명단 확보 ---
 nodes = {}
 arrows_in = defaultdict(list)
 arrows_out = defaultdict(list)
+all_horse_names = set() # 검색용 명단 만들기
 
 def parse(node, parent_id=None):
     nid = node.get('ID')
     text = node.get('TEXT', '').strip()
+    
     if nid:
         nodes[nid] = {'name': text, 'parent': parent_id}
+        # 이름이 있고, 너무 짧거나(1글자) 이상한 기호만 있는 게 아니면 명단에 추가
+        if len(text) > 1: 
+            all_horse_names.add(text)
+            
         for arrow in node.findall('arrowlink'):
             dest = arrow.get('DESTINATION')
             if dest:
                 arrows_out[nid].append(dest)
                 arrows_in[dest].append(nid)
+                
     for child in node.findall('node'):
         parse(child, nid)
 
 parse(root)
 
-# --- 4. 검색 및 결과 표시 ---
-query = st.text_input("이름 입력 (예: Bernardini)", "")
+# 명단 가나다순 정렬
+sorted_names = sorted(list(all_horse_names))
 
-if query:
-    # ★ 스마트 검색: 대소문자 구분 없이, 이름의 일부만 맞아도 찾습니다!
-    # 예: 'bernardini'라고 쳐도 '- - Bernardini 2003'을 찾아냅니다.
-    target_ids = [nid for nid, info in nodes.items() if query.lower() in info['name'].lower()]
+# --- 4. 검색 화면 (자동완성 기능) ---
+st.write("분석하고 싶은 **씨수말 이름**을 선택하거나 타이핑하세요. (일부만 쳐도 나옵니다)")
+
+# ★ 핵심: 텍스트 입력창 대신 '선택 박스' 사용
+# 사용자가 'Ber'라고 치면 목록에서 'Bernardini'를 찾아줍니다.
+selected_name = st.selectbox(
+    "검색할 말을 선택하세요:", 
+    options=["(말을 선택해주세요)"] + sorted_names, # 첫 번째는 안내 문구
+    index=0
+)
+
+# 사용자가 말을 선택했을 때만 분석 시작
+if selected_name != "(말을 선택해주세요)":
+    
+    # 선택된 이름에 해당하는 모든 ID 찾기
+    target_ids = [nid for nid, info in nodes.items() if info['name'] == selected_name]
     
     if not target_ids:
-        st.warning(f"❌ '{query}' 검색 결과가 없습니다.")
+        st.warning("데이터 연결 오류: 이름을 찾았으나 ID를 매칭하지 못했습니다.")
     else:
-        # 검색된 말이 여러 마리일 경우 선택박스 표시 (가장 깔끔한 방법)
-        found_names = [nodes[nid]['name'] for nid in target_ids]
+        # 첫 번째 매칭된 ID 사용
+        sire_id = target_ids[0]
         
-        # 중복 제거 및 정렬
-        found_names = sorted(list(set(found_names)))
-        
-        selected_name = st.selectbox(f"검색된 말 {len(found_names)}마리 중 선택하세요:", found_names)
-        
-        # 선택한 말의 ID 찾기 (첫 번째 일치하는 ID 사용)
-        selected_id = next(nid for nid, info in nodes.items() if info['name'] == selected_name)
-        
-        # 자마 분석 로직
         colts = []; fillies = []; seen = set()
-        children = [nid for nid, info in nodes.items() if info['parent'] == selected_id]
+        children = [nid for nid, info in nodes.items() if info['parent'] == sire_id]
         
         for child_id in children:
             if child_id in seen: continue
@@ -103,8 +111,7 @@ if query:
                             partner_name = nodes[partner_id]['name'] if partner_id in nodes else "?"
                             fillies.append({'child': name, 'partner': partner_name, 'link_info': nodes[foal_id]['name']})
                             seen.add(child_id)
-
-        # 결과 화면 출력
+        
         st.success(f"✅ **{selected_name}** 분석 완료! (수말 {len(colts)}두 / 암말 {len(fillies)}두)")
         
         c1, c2 = st.columns(2)
@@ -112,15 +119,12 @@ if query:
             st.markdown(f"<div class='header' style='color:#2b6cb0;'>🟦 수말 자마 (Sons: {len(colts)})</div>", unsafe_allow_html=True)
             if colts:
                 for c in colts:
-                    # 보기 좋게 이름 정리
-                    clean_child = c['child']
-                    clean_bms = c['bms']
                     st.markdown(f"""
                     <div class='card male-card'>
-                        <div class='main-text'>🐎 {clean_child}</div>
+                        <div class='main-text'>🐎 {c['child']}</div>
                         <div class='sub-text'>
                             어미: {c['link_info']}<br>
-                            👉 <b>외조부(BMS): <span class='highlight'>{clean_bms}</span></b>
+                            👉 <b>외조부(BMS): <span class='highlight'>{c['bms']}</span></b>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
@@ -131,14 +135,12 @@ if query:
             st.markdown(f"<div class='header' style='color:#d53f8c;'>🩷 암말 자마 (Daughters: {len(fillies)})</div>", unsafe_allow_html=True)
             if fillies:
                 for f in fillies:
-                    clean_child = f['child']
-                    clean_partner = f['partner']
                     st.markdown(f"""
                     <div class='card female-card'>
-                        <div class='main-text'>🎀 {clean_child}</div>
+                        <div class='main-text'>🎀 {c['child']}</div>
                         <div class='sub-text'>
                             자마: {f['link_info']}<br>
-                            👉 <b>교배 파트너(Sire): <span class='highlight'>{clean_partner}</span></b>
+                            👉 <b>교배 파트너(Sire): <span class='highlight'>{c['partner']}</span></b>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
