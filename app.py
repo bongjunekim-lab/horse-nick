@@ -2,6 +2,7 @@ import streamlit as st
 import xml.etree.ElementTree as ET
 import os
 
+# 1. 페이지 설정
 st.set_page_config(page_title="씨수말 닉 분석기 (Line Trace)", layout="wide")
 
 # 스타일 설정
@@ -14,8 +15,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("🐎 씨수말 닉(Nick) 구조 분석기")
-st.caption("대전제: 자마 ──선──> 엄마 노드에서 오직 '아빠(외조부) 프로필'만 역추적하여 가져옵니다.")
+st.caption("설계 준수: 자마 ──선──> 엄마 노드(아빠 프로필 포함) 정보를 역추적하여 한 줄로 조립합니다.")
 
+# 2. 검색창
 query = st.text_input("씨수말 이름을 입력하세요:", "").strip()
 
 if query:
@@ -25,50 +27,55 @@ if query:
         tree = ET.parse('data.mm')
         root = tree.getroot()
         
+        # --- 1단계: 검색 대상 부마 찾기 ---
         candidates = []
         for node in root.iter('node'):
             name = node.get('TEXT', '').strip()
             if query.lower() in name.lower():
                 child_nodes = node.findall('node')
-                if child_nodes:
+                if child_nodes: # 자마가 있는 경우만 후보
                     candidates.append((node, len(child_nodes), name))
         
         if not candidates:
             st.warning(f"❌ '{query}' 관련 데이터를 찾을 수 없습니다.")
         else:
+            # 자식이 가장 많은 노드 선택
             best_node, _, best_name = max(candidates, key=lambda x: x[1])
             
             males = []
             females = []
             foals = best_node.findall('node') 
             
+            # --- 2단계: 자마 순회 및 설계 로직 적용 ---
             for foal in foals:
                 foal_name = foal.get('TEXT', '').strip()
                 
-                # [대전제] 자마 노드 밑에 선(엄마 노드)이 있는지 확인
-                line_connections = foal.findall('node')
-                if not line_connections:
+                # [설계 준수 1] 선(Line) 존재 여부 확인
+                # 자마 노드 바로 아래에 연결된 노드(findall('node'))가 있는지 확인
+                line_to_mom = foal.findall('node')
+                
+                if not line_to_mom:
+                    # 선으로 연결되지 않은 것은 대전제에 따라 무시
                     continue 
 
-                # [역추적 로직] 자마 ──선──> 엄마 노드 도착
-                mom_node = line_connections[0]
-                mom_full_text = mom_node.get('TEXT', '').strip()
+                # [설계 준수 2] 선으로 연결된 바로 다음 단계 노드(엄마 노드) 딱 하나만 잡기
+                mom_node = line_to_mom[0]
+                
+                # [설계 준수 3] 엄마 노드에 적힌 '아빠(외조부) 프로필'을 통째로 복사
+                # 하부의 지저분한 데이터로 내려가지 않고, 그 노드의 TEXT만 가져옵니다.
+                bms_profile = mom_node.get('TEXT', '').strip()
 
-                # [프로필 추출] 엄마 노드 텍스트에서 '아빠(외조부)' 정보만 분리
-                # 보통 "BMS이름 / 엄마이름" 혹은 "BMS이름 (연도) ..." 형식이므로 
-                # 가장 앞부분의 핵심 이름/프로필만 가져오도록 처리합니다.
-                # 여기서는 쉼표(,)나 슬래시(/) 기준 앞부분 혹은 전체 텍스트 중 불필요한 하드데이터 제외
-                bms_profile = mom_full_text.split(',')[0].split('/')[0].strip()
-
-                # 결과 조립: 자마이름 (아빠 프로필)
+                # [설계 준수 4] 결과 조립: 자마이름 (가져온 프로필 텍스트)
+                # 불필요한 split이나 가공 없이, 선생님 말씀대로 그 박스의 프로필을 그대로 괄호에 넣습니다.
                 display_html = f"<b>{foal_name}</b> <span style='color:gray; font-size:0.85em;'>({bms_profile})</span>"
 
+                # 성별 분류 (이름에 '암)' 글자 기준)
                 if "암)" in foal_name or "Filly" in foal_name:
                     females.append(display_html)
                 else:
                     males.append(display_html)
 
-            # --- 화면 출력 ---
+            # --- 3단계: 화면 출력 ---
             st.markdown(f'<div class="header-box">📊 {best_name} 닉 분석 결과 (총 {len(males)+len(females)}두)</div>', unsafe_allow_html=True)
             col1, col2 = st.columns(2)
             
@@ -80,4 +87,4 @@ if query:
             with col2:
                 st.error(f"🟥 암말 / Sire 라인 ({len(females)})")
                 for item in females:
-                    st.markdown(f'<div class="female-box">🐎 {item}</div>', unsafe_allow_html=True) 
+                    st.markdown(f'<div class="female-box">🐎 {item}</div>', unsafe_allow_html=True)
