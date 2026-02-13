@@ -3,16 +3,33 @@ import xml.etree.ElementTree as ET
 import os
 from collections import defaultdict
 
+# --- 1. 페이지 설정 ---
 st.set_page_config(page_title="씨수말 닉 분석기", layout="wide")
-st.title("🐎 씨수말 닉(Nick) 분석기 (탐정 모드)")
 
-# --- 데이터 로딩 ---
+st.markdown("""
+<style>
+    .header { font-size: 1.2em; font-weight: bold; margin-bottom: 10px; }
+    .card { padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 5px solid #ccc; background-color: #f9f9f9; }
+    .male-card { border-left-color: #2b6cb0; }
+    .female-card { border-left-color: #d53f8c; }
+    .main-text { font-size: 1.1em; font-weight: bold; color: #333; }
+    .sub-text { font-size: 0.9em; color: #666; margin-top: 5px; }
+    .highlight { color: #c53030; font-weight: bold; }
+</style>
+""", unsafe_allow_html=True)
+
+st.title("🐎 씨수말 닉(Nick) 분석기")
+st.write("분석하고 싶은 **씨수말 이름**을 입력하세요.")
+
+# --- 2. 데이터 로딩 (조용히 실행) ---
 file_path = 'data.mm'
+
 if not os.path.exists(file_path):
-    st.error("🚨 데이터 파일이 없습니다.")
+    st.error("🚨 데이터 파일(data.mm)이 없습니다.")
     st.stop()
 
 try:
+    # 특수문자 깨짐 방지하며 읽기
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
         xml_content = f.read()
     root = ET.fromstring(xml_content)
@@ -20,20 +37,16 @@ except Exception as e:
     st.error(f"❌ 데이터 읽기 오류: {e}")
     st.stop()
 
-# --- 데이터 분석 ---
+# --- 3. 데이터 분석 ---
 nodes = {}
 arrows_in = defaultdict(list)
 arrows_out = defaultdict(list)
-all_names = [] # 모든 이름을 저장할 리스트
 
 def parse(node, parent_id=None):
     nid = node.get('ID')
     text = node.get('TEXT', '').strip()
     if nid:
         nodes[nid] = {'name': text, 'parent': parent_id}
-        if text: # 이름이 비어있지 않으면 추가
-            all_names.append(text)
-            
         for arrow in node.findall('arrowlink'):
             dest = arrow.get('DESTINATION')
             if dest:
@@ -44,42 +57,29 @@ def parse(node, parent_id=None):
 
 parse(root)
 
-# --- 🔍 탐정 기능: 이름 미리보기 ---
-st.info("👇 **검색이 잘 안 되면 아래 목록에서 찾아서 복사하세요!**")
-
-with st.expander("📜 **파일에 들어있는 말 이름 전체 명단 (클릭)**"):
-    # 'ber' 같은 글자가 포함된 이름만 우선적으로 보여주기 위한 필터
-    search_hint = st.text_input("찾고 싶은 이름의 일부를 영어로 적어보세요 (예: ber)", "")
-    
-    if search_hint:
-        filtered_names = [name for name in all_names if search_hint.lower() in name.lower()]
-        st.write(f"🔍 **'{search_hint}'가 포함된 말 {len(filtered_names)}마리 발견:**")
-        st.write(filtered_names[:100]) # 100개만 보여줌
-    else:
-        st.write("아래는 무작위 100마리 샘플입니다:")
-        st.write(all_names[:100])
-
-st.divider()
-
-# --- 메인 검색 기능 ---
-st.write("### 🔎 분석할 씨수말 검색")
-query = st.text_input("위 명단에서 확인한 이름을 정확히 입력하세요 (부분만 입력해도 됨)", "")
+# --- 4. 검색 및 결과 표시 ---
+query = st.text_input("이름 입력 (예: Bernardini)", "")
 
 if query:
-    # ★ 핵심: 대소문자 구분 없이, 부분 일치하면 다 찾습니다!
+    # ★ 스마트 검색: 대소문자 구분 없이, 이름의 일부만 맞아도 찾습니다!
+    # 예: 'bernardini'라고 쳐도 '- - Bernardini 2003'을 찾아냅니다.
     target_ids = [nid for nid, info in nodes.items() if query.lower() in info['name'].lower()]
     
     if not target_ids:
-        st.error(f"❌ '{query}'를 찾을 수 없습니다. 위 명단 확인 기능을 써보세요!")
+        st.warning(f"❌ '{query}' 검색 결과가 없습니다.")
     else:
-        # 검색된 말이 여러 마리일 경우 선택하게 함 (동명이마 방지)
+        # 검색된 말이 여러 마리일 경우 선택박스 표시 (가장 깔끔한 방법)
         found_names = [nodes[nid]['name'] for nid in target_ids]
-        selected_name = st.selectbox("검색된 말 중 하나를 선택하세요:", found_names)
         
-        # 선택한 말의 ID 찾기
-        selected_id = target_ids[found_names.index(selected_name)]
+        # 중복 제거 및 정렬
+        found_names = sorted(list(set(found_names)))
         
-        # 자마 분석 시작
+        selected_name = st.selectbox(f"검색된 말 {len(found_names)}마리 중 선택하세요:", found_names)
+        
+        # 선택한 말의 ID 찾기 (첫 번째 일치하는 ID 사용)
+        selected_id = next(nid for nid, info in nodes.items() if info['name'] == selected_name)
+        
+        # 자마 분석 로직
         colts = []; fillies = []; seen = set()
         children = [nid for nid, info in nodes.items() if info['parent'] == selected_id]
         
@@ -87,7 +87,7 @@ if query:
             if child_id in seen: continue
             info = nodes[child_id]; name = info['name']; is_female = '암)' in name
             
-            if not is_female:
+            if not is_female: # 수말
                 if child_id in arrows_in:
                     for mom_id in arrows_in[child_id]:
                         if mom_id in nodes:
@@ -95,7 +95,7 @@ if query:
                             bms_name = nodes[bms_id]['name'] if bms_id in nodes else "?"
                             colts.append({'child': name, 'bms': bms_name, 'link_info': nodes[mom_id]['name']})
                             seen.add(child_id)
-            else:
+            else: # 암말
                 if child_id in arrows_out:
                     for foal_id in arrows_out[child_id]:
                         if foal_id in nodes:
@@ -104,12 +104,43 @@ if query:
                             fillies.append({'child': name, 'partner': partner_name, 'link_info': nodes[foal_id]['name']})
                             seen.add(child_id)
 
-        st.success(f"✅ **{selected_name}** 분석 결과: 수말 {len(colts)}두 / 암말 {len(fillies)}두")
+        # 결과 화면 출력
+        st.success(f"✅ **{selected_name}** 분석 완료! (수말 {len(colts)}두 / 암말 {len(fillies)}두)")
         
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown("### 🟦 수말 (Sons)")
-            for c in colts: st.info(f"🐎 {c['child']} \n\n (BMS: {c['bms']})")
+            st.markdown(f"<div class='header' style='color:#2b6cb0;'>🟦 수말 자마 (Sons: {len(colts)})</div>", unsafe_allow_html=True)
+            if colts:
+                for c in colts:
+                    # 보기 좋게 이름 정리
+                    clean_child = c['child']
+                    clean_bms = c['bms']
+                    st.markdown(f"""
+                    <div class='card male-card'>
+                        <div class='main-text'>🐎 {clean_child}</div>
+                        <div class='sub-text'>
+                            어미: {c['link_info']}<br>
+                            👉 <b>외조부(BMS): <span class='highlight'>{clean_bms}</span></b>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.info("데이터 없음")
+
         with c2:
-            st.markdown("### 🩷 암말 (Daughters)")
-            for f in fillies: st.error(f"🎀 {f['child']} \n\n (Sire: {f['partner']})")
+            st.markdown(f"<div class='header' style='color:#d53f8c;'>🩷 암말 자마 (Daughters: {len(fillies)})</div>", unsafe_allow_html=True)
+            if fillies:
+                for f in fillies:
+                    clean_child = f['child']
+                    clean_partner = f['partner']
+                    st.markdown(f"""
+                    <div class='card female-card'>
+                        <div class='main-text'>🎀 {clean_child}</div>
+                        <div class='sub-text'>
+                            자마: {f['link_info']}<br>
+                            👉 <b>교배 파트너(Sire): <span class='highlight'>{clean_partner}</span></b>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+            else:
+                st.info("데이터 없음")
