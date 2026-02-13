@@ -4,62 +4,78 @@ import os
 import re
 from collections import defaultdict
 
+# --- 1. 화면 설정 ---
 st.set_page_config(page_title="씨수말 닉 분석기", layout="wide")
-st.title("🐎 씨수말 닉(Nick) 분석기 (심도 검색 버전)")
 
-# --- 데이터 로드 ---
+st.markdown("""
+<style>
+    .header { font-size: 1.2em; font-weight: bold; margin-bottom: 10px; }
+    .card { padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 5px solid #ccc; background-color: #f9f9f9; }
+    .male-card { border-left-color: #2b6cb0; }
+    .female-card { border-left-color: #d53f8c; }
+    .main-text { font-size: 1.1em; font-weight: bold; color: #333; }
+    .sub-text { font-size: 0.9em; color: #666; margin-top: 5px; }
+    .highlight { color: #c53030; font-weight: bold; }
+</style>
+""", unsafe_allow_html=True)
+
+st.title("🐎 씨수말 닉(Nick) 분석기 (최종 강화형)")
+
+# --- 2. 데이터 로딩 ---
 file_path = 'data.mm'
 try:
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
         xml_content = f.read()
     root = ET.fromstring(xml_content)
 except Exception as e:
-    st.error(f"파일 로드 오류: {e}")
+    st.error(f"데이터 로드 오류: {e}")
     st.stop()
 
-# --- 데이터 파싱 ---
+# --- 3. 데이터 분석 ---
 nodes = {}; arrows_in = defaultdict(list); arrows_out = defaultdict(list)
-all_names = set()
+all_horse_names = set()
 
 def parse(node, parent_id=None):
     nid = node.get('ID'); text = node.get('TEXT', '').strip()
     if nid:
         nodes[nid] = {'name': text, 'parent': parent_id}
-        if len(text) > 1: all_names.add(text)
+        if len(text) > 1: all_horse_names.add(text)
         for arrow in node.findall('arrowlink'):
             dest = arrow.get('DESTINATION')
             if dest: arrows_out[nid].append(dest); arrows_in[dest].append(nid)
     for child in node.findall('node'): parse(child, nid)
 parse(root)
 
-# --- 🔍 핵심: 마명 정제 함수 ---
-def get_clean_name(text):
-    # 1. 앞부분의 모든 특수기호(-, @, #, *, 공백 등) 제거
-    text = re.sub(r'^[^a-zA-Z0-9가-힣]+', '', text)
-    # 2. 성별 표시(암), 수), 거)) 제거
-    text = re.sub(r'^(암|수|거)\)\s*', '', text)
-    # 3. 비교를 위해 소문자 변환 및 특수문자(') 제거
+# --- 4. 강력한 이름 정제 함수 ---
+def super_clean(text):
+    # 대소문자 무시, 공백 무시, 모든 특수기호(', -, @, #, *, 암), 수)) 제거
+    # 오직 순수한 '글자'와 '숫자'만 남깁니다.
     return re.sub(r'[^a-zA-Z0-9가-힣]', '', text).lower()
 
-# --- 화면 구현 ---
+# --- 5. 검색창 구현 ---
 st.write("### 🔎 스마트 검색")
-st.info("기호나 성별 표시(암, 수)를 제외한 **이름만** 입력하세요.")
+st.info("💡 철자 일부만 입력해도 기호나 따옴표를 무시하고 찾아줍니다.")
 
-query = st.text_input("마명 입력 (예: bernardini, medaglia, unbridled)", "").strip()
+query_input = st.text_input("마명 입력 (예: unbridled, medagl, prospector)", "").strip()
 
-if query:
-    clean_query = re.sub(r'[^a-zA-Z0-9가-힣]', '', query).lower()
-    # 정제된 이름과 검색어 비교
-    matched_results = [name for name in all_names if clean_query in get_clean_name(name)]
+if query_input:
+    clean_query = super_clean(query_input)
     
-    if not matched_results:
-        st.warning(f"❌ '{query}'와 일치하는 말을 찾을 수 없습니다.")
+    # 정제된 이름끼리 비교하여 일치하는 목록 추출
+    matched_names = []
+    for name in sorted(list(all_horse_names)):
+        if clean_query in super_clean(name):
+            matched_names.append(name)
+            
+    if not matched_names:
+        st.warning(f"❌ '{query_input}' 검색 결과가 없습니다.")
     else:
-        # 검색된 결과 중 선택
-        selected = st.selectbox(f"🔍 {len(matched_results)}마리 발견! 정확한 이름을 선택하세요:", sorted(matched_results))
+        # 검색된 결과 선택박스
+        selected_name = st.selectbox(f"🔍 {len(matched_names)}마리 발견! 아래 목록에서 선택하세요:", matched_names)
         
-        # 분석 로직 실행
-        target_id = [nid for nid, info in nodes.items() if info['name'] == selected][0]
+        target_id = [nid for nid, info in nodes.items() if info['name'] == selected_name][0]
+        
+        # 자마 분석 실행
         colts = []; fillies = []; seen = set()
         children = [nid for nid, info in nodes.items() if info['parent'] == target_id]
         
@@ -81,11 +97,13 @@ if query:
                             fillies.append({'child': name, 'sire': sire, 'foal': nodes[f_id]['name']})
                             seen.add(c_id)
 
-        st.success(f"✅ **{selected}** 분석 결과")
+        st.success(f"✅ **{selected_name}** 분석 결과")
         c1, c2 = st.columns(2)
         with c1:
-            st.markdown("### 🟦 수말 (Sons)")
-            for c in colts: st.info(f"🐎 {c['child']}\n\n어미: {c['mom']} / BMS: {c['bms']}")
+            st.markdown(f"### 🟦 수말 자마 (Sons: {len(colts)})")
+            for c in colts:
+                st.markdown(f"<div class='card male-card'><div class='main-text'>🐎 {c['child']}</div><div class='sub-text'>어미: {c['mom']}<br>👉 <b>BMS: <span class='highlight'>{c['bms']}</span></b></div></div>", unsafe_allow_html=True)
         with c2:
-            st.markdown("### 🩷 암말 (Daughters)")
-            for f in fillies: st.error(f"🎀 {f['child']}\n\n자마: {f['foal']} / Sire: {f['sire']}")
+            st.markdown(f"### 🩷 암말 자마 (Daughters: {len(fillies)})")
+            for f in fillies:
+                st.markdown(f"<div class='card female-card'><div class='main-text'>🎀 {f['child']}</div><div class='sub-text'>자마: {f['foal']}<br>👉 <b>Sire: <span class='highlight'>{f['sire']}</span></b></div></div>", unsafe_allow_html=True)
